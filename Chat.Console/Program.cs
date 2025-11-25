@@ -76,14 +76,11 @@ class Program
         var services = new ServiceCollection();
 
         services.AddLogging(builder =>
-            {
-                builder.AddConsole();
-                builder.AddDebug();
-                builder.SetMinimumLevel(LogLevel.Information);
-
-                builder.AddFilter("Microsoft", LogLevel.Warning);
-                builder.AddFilter("System", LogLevel.Warning);
-            });
+        {
+            builder.AddConsole();
+            builder.AddDebug();
+            builder.SetMinimumLevel(LogLevel.Information);
+        });
 
         services.AddMediatR(cfg =>
         {
@@ -94,7 +91,6 @@ class Program
         });
 
         services.AddSingleton<IUIService, ConsoleUIService>();
-
         services.AddSingleton<IUserService, UserService>();
         services.AddSingleton<IEncryptionService, AesEncryptionService>();
 
@@ -103,10 +99,12 @@ class Program
             var mediator = provider.GetRequiredService<IMediator>();
             var userService = provider.GetRequiredService<IUserService>();
             var encryptionService = provider.GetRequiredService<IEncryptionService>();
+            var logger = provider.GetRequiredService<ILogger<NetworkService>>();
+            var loggerFactory = provider.GetRequiredService<ILoggerFactory>();
 
             userService.SetCurrentUser(username, Core.Enums.UserRole.Admin);
 
-            return new NetworkService(username, _udpPort, _tcpPort, mediator, userService, encryptionService);
+            return new NetworkService(username, _udpPort, _tcpPort, mediator, userService, encryptionService, logger, loggerFactory);
         });
 
         services.AddSingleton<NetworkService>(provider =>

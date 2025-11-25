@@ -8,8 +8,8 @@ namespace Chat.Security.Encryption;
 public class AesEncryptionService : IEncryptionService
 {
     private readonly Dictionary<string, (byte[] X, byte[] Y)> _peerPublicKeys = new();
-    private byte[] _privateKey;
-    private (byte[] X, byte[] Y) _publicKey;
+    private byte[]? _privateKey;
+    private (byte[] X, byte[] Y)? _publicKey;
     private readonly ILogger<AesEncryptionService> _logger;
 
     public AesEncryptionService(ILogger<AesEncryptionService> logger)
@@ -20,9 +20,11 @@ public class AesEncryptionService : IEncryptionService
 
     public byte[] GetPublicKey()
     {
-        var publicKeyBytes = new byte[_publicKey.X.Length + _publicKey.Y.Length];
-        Buffer.BlockCopy(_publicKey.X, 0, publicKeyBytes, 0, _publicKey.X.Length);
-        Buffer.BlockCopy(_publicKey.Y, 0, publicKeyBytes, _publicKey.X.Length, _publicKey.Y.Length);
+        if (_publicKey == null) throw new InvalidOperationException("Public key not initialized");
+
+        var publicKeyBytes = new byte[_publicKey.Value.X.Length + _publicKey.Value.Y.Length];
+        Buffer.BlockCopy(_publicKey.Value.X, 0, publicKeyBytes, 0, _publicKey.Value.X.Length);
+        Buffer.BlockCopy(_publicKey.Value.Y, 0, publicKeyBytes, _publicKey.Value.X.Length, _publicKey.Value.Y.Length);
         return publicKeyBytes;
     }
 
@@ -182,9 +184,9 @@ public class AesEncryptionService : IEncryptionService
 
             var parameters = ecdh.ExportParameters(true);
             _privateKey = parameters.D;
-            _publicKey = (parameters.Q.X, parameters.Q.Y);
+            _publicKey = (parameters.Q.X!, parameters.Q.Y!);
 
-            _logger.LogInformation("ECDH key pair generated successfully. Public key size: {XLength}+{YLength} bytes", _publicKey.X.Length, _publicKey.Y.Length);
+            _logger.LogInformation("ECDH key pair generated successfully. Public key size: {XLength}+{YLength} bytes", _publicKey.Value.X.Length, _publicKey.Value.Y.Length);
         }
         catch (Exception ex)
         {
@@ -197,6 +199,8 @@ public class AesEncryptionService : IEncryptionService
     {
         try
         {
+            if (_privateKey == null || _publicKey == null) throw new InvalidOperationException("Key pair not initialized");
+
             using var ecdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
             var ourParams = new ECParameters
@@ -205,8 +209,8 @@ public class AesEncryptionService : IEncryptionService
                 D = _privateKey,
                 Q = new ECPoint
                 {
-                    X = _publicKey.X,
-                    Y = _publicKey.Y
+                    X = _publicKey.Value.X,
+                    Y = _publicKey.Value.Y
                 }
             };
             ecdh.ImportParameters(ourParams);

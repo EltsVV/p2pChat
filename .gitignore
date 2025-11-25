@@ -1,0 +1,46 @@
+# Файлы сборки и выполнения
+bin/
+obj/
+*.exe
+*.dll
+*.pdb
+*.cache
+
+# Файлы конфигурации среды
+.env
+appsettings.*.json
+appsettings.Development.json
+
+# Файлы IDE
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+
+# Файлы операционной системы
+.DS_Store
+Thumbs.db
+
+# Временные файлы
+temp/
+tmp/
+*.tmp
+*.log
+*~
+~$*
+
+# Файлы пакетов NuGet
+packages/
+*.nupkg
+.nuget/
+
+# Файлы покрытия тестов
+coverage/
+*.coverage
+*.coveragexml
+
+# Файлы профилирования
+*.psess
+*.vsp
+*.vspx

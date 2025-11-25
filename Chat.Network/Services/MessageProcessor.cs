@@ -20,13 +20,7 @@ public class MessageProcessor
     private readonly ILogger<MessageProcessor> _logger;
     private readonly HashSet<string> _respondedUsers = new();
 
-    public MessageProcessor(
-        string username,
-        IMediator mediator,
-        IUserService userService,
-        IEncryptionService encryptionService,
-        INetworkService networkService,
-        ILogger<MessageProcessor> logger)
+    public MessageProcessor(string username, IMediator mediator, IUserService userService, IEncryptionService encryptionService, INetworkService networkService, ILogger<MessageProcessor> logger)
     {
         _localUsername = username;
         _mediator = mediator;
@@ -49,29 +43,12 @@ public class MessageProcessor
             var json = Encoding.UTF8.GetString(data);
             var message = JsonSerializer.Deserialize<ChatMessage>(json, _jsonOptions);
 
-            if (message == null)
-            {
-                _logger.LogWarning("Received null message from {Endpoint}", endpoint);
-                return;
-            }
-
-            if (message.Sender == _localUsername)
-            {
-                _logger.LogDebug("Ignoring message from self: {Sender}", message.Sender);
-                return;
-            }
-
-            if (_userService.IsUserBanned(message.Sender))
-            {
-                _logger.LogInformation("Ignoring message from banned user: {Sender}", message.Sender);
-                return;
-            }
-
-            _logger.LogDebug("Processing message from {Sender}, type: {MessageType}", message.Sender, message.Type);
-
+            if (message == null) return;
+            if (message.Sender == _localUsername) return;
+            if (_userService.IsUserBanned(message.Sender)) return;
             if (await ProcessAdminCommandAsync(message)) return;
             if (await ProcessUsernameConflictAsync(message, endpoint)) return;
-            if (await ProcessKeyExchangeAsync(message)) return;
+            if (await ProcessKeyExchangeAsync(message, endpoint)) return;
 
             await ProcessRegularMessageAsync(message, endpoint);
         }
@@ -88,22 +65,13 @@ public class MessageProcessor
             if (message.Content.Contains("has been banned"))
             {
                 var bannedUser = ExtractUsernameFromBanMessage(message.Content);
-                if (!string.IsNullOrEmpty(bannedUser))
-                {
-                    _logger.LogInformation("Processing ban sync for user: {BannedUser} from {Sender}", bannedUser, message.Sender);
-                    _userService.BanUser(bannedUser);
-                    _logger.LogInformation("User {BannedUser} banned via sync from {Sender}", bannedUser, message.Sender);
-                }
+                if (!string.IsNullOrEmpty(bannedUser)) await Task.Run(() => _userService.BanUser(bannedUser));
                 return true;
             }
             else if (message.Content.Contains("has been unbanned"))
             {
                 var unbannedUser = ExtractUsernameFromUnbanMessage(message.Content);
-                if (!string.IsNullOrEmpty(unbannedUser))
-                {
-                    _logger.LogInformation("Processing unban sync for user: {UnbannedUser} from {Sender}", unbannedUser, message.Sender);
-                    _userService.UnbanUser(unbannedUser);
-                }
+                if (!string.IsNullOrEmpty(unbannedUser)) await Task.Run(() => _userService.UnbanUser(unbannedUser));
                 return true;
             }
         }
@@ -116,8 +84,6 @@ public class MessageProcessor
         if (existingUser != null && existingUser.EndPoint != null &&
             !existingUser.EndPoint.Equals(new IPEndPoint(endpoint.Address, message.TcpPort)))
         {
-            _logger.LogWarning("Username conflict detected for {Sender}", message.Sender);
-
             var conflictMessage = new ChatMessage
             {
                 Sender = _localUsername,
@@ -132,26 +98,40 @@ public class MessageProcessor
         return false;
     }
 
-    private async Task<bool> ProcessKeyExchangeAsync(ChatMessage message)
+    private async Task<bool> ProcessKeyExchangeAsync(ChatMessage message, IPEndPoint endpoint)
     {
         if (message.Type == MessageType.System)
         {
             if (message.Content.StartsWith("KEY_EXCHANGE_REQUEST:"))
             {
+                await AddOrUpdateUserFromMessage(message, endpoint);
                 var keyBase64 = message.Content.Substring("KEY_EXCHANGE_REQUEST:".Length);
-                _logger.LogInformation("Processing key exchange request from {Sender}", message.Sender);
                 await _mediator.Publish(new KeyExchangeRequestEvent(message.Sender, keyBase64));
                 return true;
             }
             else if (message.Content.StartsWith("KEY_EXCHANGE_RESPONSE:"))
             {
+                await AddOrUpdateUserFromMessage(message, endpoint);
                 var keyBase64 = message.Content.Substring("KEY_EXCHANGE_RESPONSE:".Length);
-                _logger.LogInformation("Processing key exchange response from {Sender}", message.Sender);
                 await _mediator.Publish(new KeyExchangeResponseEvent(message.Sender, keyBase64));
                 return true;
             }
         }
         return false;
+    }
+
+    private async Task AddOrUpdateUserFromMessage(ChatMessage message, IPEndPoint endpoint)
+    {
+        try
+        {
+            var userEndpoint = new IPEndPoint(endpoint.Address, message.TcpPort);
+            var user = new User { Username = message.Sender, EndPoint = userEndpoint };
+            await _mediator.Publish(new UserJoinenEvent(user));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to add user {Username}", message.Sender);
+        }
     }
 
     private async Task ProcessRegularMessageAsync(ChatMessage message, IPEndPoint endpoint)
@@ -163,24 +143,17 @@ public class MessageProcessor
 
         if (message.Type == MessageType.System && message.Content.Contains("joined"))
         {
-            _logger.LogDebug("Processing user join: {Sender}", message.Sender);
-            await ProcessUserJoinAsync(message.Sender, userEndpoint);
+            if (!_respondedUsers.Contains(message.Sender))
+            {
+                _respondedUsers.Add(message.Sender);
+                await SendOurKeyToNewUser(message.Sender, userEndpoint);
+            }
         }
 
         await _mediator.Publish(new MessageReceivedEvent(message));
     }
 
-    private async Task ProcessUserJoinAsync(string username, IPEndPoint endpoint)
-    {
-        if (!_respondedUsers.Contains(username))
-        {
-            _respondedUsers.Add(username);
-            await Task.Delay(new Random().Next(100, 500));
-            await InitiateKeyExchangeAsync(username, endpoint);
-        }
-    }
-
-    private async Task InitiateKeyExchangeAsync(string targetUser, IPEndPoint endpoint)
+    private async Task SendOurKeyToNewUser(string newUsername, IPEndPoint endpoint)
     {
         try
         {
@@ -194,12 +167,11 @@ public class MessageProcessor
                 TcpPort = _networkService.GetTcpPort()
             };
 
-            _logger.LogDebug("Initiating key exchange with {TargetUser}", targetUser);
             await _networkService.SendP2PMessageAsync(keyMessage, endpoint);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Key exchange initiation error with {TargetUser}", targetUser);
+            _logger.LogError(ex, "Failed to send key to {NewUsername}", newUsername);
         }
     }
 
@@ -217,7 +189,6 @@ public class MessageProcessor
                 TcpPort = _networkService.GetTcpPort()
             };
 
-            _logger.LogDebug("Sending key exchange response to {TargetUser}", targetUser);
             await _networkService.SendP2PMessageAsync(responseMessage, endpoint);
         }
         catch (Exception ex)
@@ -246,10 +217,7 @@ public class MessageProcessor
         {
             var start = "User ".Length;
             var end = content.IndexOf(" has been unbanned");
-            if (end > start)
-            {
-                return content.Substring(start, end - start);
-            }
+            if (end > start) return content.Substring(start, end - start);
         }
         return null;
     }

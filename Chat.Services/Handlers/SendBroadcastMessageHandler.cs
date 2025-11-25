@@ -3,6 +3,7 @@ using Chat.Core.Commands;
 using Chat.Core.Models;
 using Chat.Core.Interfaces;
 using Chat.Core.Enums;
+using Microsoft.Extensions.Logging;
 
 namespace Chat.Services.Handlers;
 
@@ -12,13 +13,15 @@ public class SendBroadcastMessageHandler : IRequestHandler<SendBroadcastMessageC
     private readonly IUserService _userService;
     private readonly IEncryptionService _encryptionService;
     private readonly EmojiService _emojiService;
+    private readonly ILogger<SendBroadcastMessageHandler> _logger;
 
-    public SendBroadcastMessageHandler(INetworkService networkService, IUserService userService, IEncryptionService encryptionService)
+    public SendBroadcastMessageHandler(INetworkService networkService, IUserService userService, IEncryptionService encryptionService, ILogger<SendBroadcastMessageHandler> logger)
     {
         _networkService = networkService;
         _userService = userService;
         _encryptionService = encryptionService;
         _emojiService = new EmojiService();
+        _logger = logger;
     }
 
     public async Task Handle(SendBroadcastMessageCommand request, CancellationToken cancellationToken)
@@ -29,22 +32,21 @@ public class SendBroadcastMessageHandler : IRequestHandler<SendBroadcastMessageC
         var processedContent = _emojiService.ReplaceEmojis(request.content);
 
         var onlineUsers = _userService.GetUsers();
-        var otherUsersWithKeys = onlineUsers.Where(u =>
-            u.KeyExchanged &&
-            u.Username != _userService.CurrentUser.Username
-        ).ToList();
+        var usersWithKeys = onlineUsers.Where(u => u.KeyExchanged && u.Username != _userService.CurrentUser.Username).ToList();
 
         string finalContent;
         bool isEncrypted = false;
 
-        if (otherUsersWithKeys.Any())
+        if (usersWithKeys.Any())
         {
             finalContent = _encryptionService.Encrypt(processedContent);
             isEncrypted = true;
+            _logger.LogInformation("Sending encrypted message to {UserCount} users", usersWithKeys.Count);
         }
         else
         {
             finalContent = processedContent;
+            _logger.LogWarning("No users with keys, sending plain text");
         }
 
         var message = new ChatMessage
@@ -58,5 +60,3 @@ public class SendBroadcastMessageHandler : IRequestHandler<SendBroadcastMessageC
         await _networkService.SendBroadcastMessageAsync(message);
     }
 }
-
-

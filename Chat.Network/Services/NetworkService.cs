@@ -15,10 +15,10 @@ public class NetworkService : INetworkService
     private readonly INetworkProtocol _broadcast;
     private readonly INetworkProtocol _p2p;
     private readonly string _localUsername;
-    private readonly int _tcpPort;
+    private int _tcpPort;
     private readonly MessageProcessor _messageProcessor;
     private readonly ILogger<NetworkService> _logger;
-
+    private readonly IEncryptionService _encryptionService;
     private readonly JsonSerializerOptions _jsonOptions = new JsonSerializerOptions
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -30,6 +30,7 @@ public class NetworkService : INetworkService
         _localUsername = username;
         _tcpPort = tcpPort;
         _logger = logger;
+        _encryptionService = encryptionService;
 
         _broadcast = new MulticastProtocol(udpPort, loggerFactory.CreateLogger<MulticastProtocol>());
         _p2p = new TcpP2P(tcpPort, loggerFactory.CreateLogger<TcpP2P>());
@@ -49,8 +50,11 @@ public class NetworkService : INetworkService
         _logger.LogInformation("Starting network services...");
         _broadcast.Start();
         _p2p.Start();
+
+        if (_p2p is IGetActualPort) _tcpPort = ((IGetActualPort)_p2p).GetActualPort();
+
         _ = BroadcastUserJoin();
-        _logger.LogInformation("Network services started");
+        _logger.LogInformation("Network services started on TCP port {TcpPort}", _tcpPort);
     }
 
     public void Stop()
@@ -114,11 +118,37 @@ public class NetworkService : INetworkService
             };
 
             await SendBroadcastMessageAsync(joinMessage);
-            _logger.LogDebug("User join broadcast sent");
+            _logger.LogInformation("User join broadcast sent");
+
+            await Task.Delay(500);
+            await BroadcastOurKey();
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error broadcasting user join");
+        }
+    }
+
+    private async Task BroadcastOurKey()
+    {
+        try
+        {
+            var ourKey = Convert.ToBase64String(_encryptionService.GetPublicKey());
+
+            var keyMessage = new ChatMessage
+            {
+                Sender = _localUsername,
+                Content = $"KEY_EXCHANGE_REQUEST:{ourKey}",
+                Type = MessageType.System,
+                TcpPort = _tcpPort
+            };
+
+            await SendBroadcastMessageAsync(keyMessage);
+            _logger.LogInformation("Our public key broadcasted to all users");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error broadcasting our key");
         }
     }
 

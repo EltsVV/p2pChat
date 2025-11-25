@@ -1,9 +1,9 @@
 using MediatR;
 using Chat.Core.Commands;
 using Chat.Core.Interfaces;
+using Microsoft.Extensions.Logging;
 using Chat.Core.Models;
 using Chat.Core.Enums;
-using Microsoft.Extensions.Logging;
 
 namespace Chat.Services.Handlers;
 
@@ -24,39 +24,62 @@ public class MessageReceivedEventHandler : INotificationHandler<MessageReceivedE
 
     public Task Handle(MessageReceivedEvent notification, CancellationToken cancellationToken)
     {
-        if (_userService.IsUserBanned(notification.chatMessage.Sender))
+        try
         {
-            _logger.LogWarning($"BLOCKED: Received message from banned user {notification.chatMessage.Sender}");
-            return Task.CompletedTask;
-        }
-
-        var message = notification.chatMessage;
-
-        if (message.IsEncrypted)
-        {
-            try
+            if (_userService.IsUserBanned(notification.chatMessage.Sender))
             {
-                message.Content = _encryptionService.Decrypt(message.Content);
-                message.IsEncrypted = false;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Decryption error for message from {Sender}", message.Sender);
-
-                var errorMessage = new ChatMessage
-                {
-                    Sender = "System",
-                    Content = $"Failed to decrypt message from {message.Sender}",
-                    Type = MessageType.System,
-                    Timestamp = DateTime.UtcNow
-                };
-
-                _uiService.DisplayMessage(errorMessage);
+                _logger.LogWarning("Blocked message from banned user {Sender}", notification.chatMessage.Sender);
                 return Task.CompletedTask;
             }
-        }
 
-        _uiService.DisplayMessage(message);
-        return Task.CompletedTask;
+            var message = notification.chatMessage;
+
+            if (message.IsEncrypted)
+            {
+                _logger.LogDebug("Attempting to decrypt message from {Sender}", message.Sender);
+
+                try
+                {
+                    var originalContent = message.Content;
+                    message.Content = _encryptionService.Decrypt(message.Content);
+                    message.IsEncrypted = false;
+
+                    _logger.LogInformation("Successfully decrypted message from {Sender}", message.Sender);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Decryption error for message from {Sender}", message.Sender);
+
+                    var errorMessage = new ChatMessage
+                    {
+                        Sender = "System",
+                        Content = $"Unable to decrypt message from {message.Sender}. Key exchange may be incomplete.",
+                        Type = MessageType.System,
+                        Timestamp = DateTime.UtcNow
+                    };
+
+                    _uiService.DisplayMessage(errorMessage);
+
+                    var encryptedMessage = new ChatMessage
+                    {
+                        Sender = message.Sender,
+                        Content = "[Encrypted message - unable to decrypt]",
+                        Type = MessageType.System,
+                        Timestamp = message.Timestamp
+                    };
+
+                    _uiService.DisplayMessage(encryptedMessage);
+                    return Task.CompletedTask;
+                }
+            }
+
+            _uiService.DisplayMessage(message);
+            return Task.CompletedTask;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error in MessageReceivedEventHandler");
+            return Task.CompletedTask;
+        }
     }
 }

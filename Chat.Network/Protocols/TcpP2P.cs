@@ -5,7 +5,11 @@ using Microsoft.Extensions.Logging;
 
 namespace Chat.Network.Protocols
 {
-    internal class TcpP2P : INetworkProtocol
+    internal interface IGetActualPort
+    {
+        int GetActualPort();
+    }
+    internal class TcpP2P : INetworkProtocol, IGetActualPort
     {
         private TcpListener _tcpListener;
         private readonly int _port;
@@ -119,9 +123,7 @@ namespace Chat.Network.Protocols
         {
             try
             {
-                return _tcpListener != null && _tcpListener.Server.IsBound
-                    ? ((IPEndPoint)_tcpListener.LocalEndpoint).Port
-                    : _port;
+                return _tcpListener != null && _tcpListener.Server.IsBound ? ((IPEndPoint)_tcpListener.LocalEndpoint).Port : _port;
             }
             catch
             {

@@ -39,7 +39,7 @@ public class P2PMessageCommand : IChatCommand
             }
 
             await _mediator.Send(new SendP2PMessageCommand(recipient, message));
-            _uiService.DisplayP2PMessageConfirmation(recipient, message);
+            _uiService.DisplayMessage(recipient, message);
         }
         catch (Exception ex)
         {

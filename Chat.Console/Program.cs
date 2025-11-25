@@ -79,7 +79,7 @@ class Program
         {
             builder.AddConsole();
             builder.AddDebug();
-            builder.SetMinimumLevel(LogLevel.Information);
+            builder.SetMinimumLevel(LogLevel.Warning);
         });
 
         services.AddMediatR(cfg =>

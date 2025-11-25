@@ -20,6 +20,7 @@ public class ConsoleUIService : IUIService
                 case Core.Enums.MessageType.Private:
                     System.Console.ForegroundColor = ConsoleColor.Magenta;
                     System.Console.WriteLine($"[Private from {message.Sender}]: {message.Content}");
+
                     break;
                 case Core.Enums.MessageType.AdminCommand:
                     System.Console.ForegroundColor = ConsoleColor.Red;
@@ -64,8 +65,7 @@ public class ConsoleUIService : IUIService
         }
         System.Console.WriteLine("====================\n");
     }
-
-    public void DisplayP2PMessageConfirmation(string recipient, string message)
+    public void DisplayMessage(string recipient, string message)
     {
         var originalColor = System.Console.ForegroundColor;
         System.Console.ForegroundColor = ConsoleColor.Magenta;

@@ -7,6 +7,7 @@ using Chat.Services;
 using Chat.Network.Services;
 using Chat.Core.Interfaces;
 using Chat.Console.Services;
+using Microsoft.Extensions.Logging;
 
 namespace Chat.Console;
 
@@ -16,50 +17,73 @@ class Program
     private static IMediator _mediator = null!;
     private static IUIService _uiService = null!;
     private static List<IChatCommand> _commands = null!;
+    private static ILogger<Program> _logger = null!;
     private static bool _isRunning = true;
     private static int _udpPort = 12345;
     private static int _tcpPort = 12346;
 
     static async Task Main(string[] args)
     {
-        if (args.Length >= 2)
+        try
         {
-            if (int.TryParse(args[0], out int udpPort) && int.TryParse(args[1], out int tcpPort))
+            if (args.Length >= 2)
             {
-                _udpPort = udpPort;
-                _tcpPort = tcpPort;
+                if (int.TryParse(args[0], out int udpPort) && int.TryParse(args[1], out int tcpPort))
+                {
+                    _udpPort = udpPort;
+                    _tcpPort = tcpPort;
+                }
+            }
+
+            System.Console.Write("Enter your username: ");
+            var username = System.Console.ReadLine()?.Trim();
+
+            if (string.IsNullOrEmpty(username))
+            {
+                System.Console.WriteLine("Username cannot be empty");
+                return;
+            }
+
+            ConfigureServices(username);
+
+            _logger = _serviceProvider.GetRequiredService<ILogger<Program>>();
+            _logger.LogInformation("Application starting for user {Username}", username);
+
+            await InitializeServices(username);
+            RegisterCommands();
+
+            _uiService.DisplaySystemMessage($"Welcome to Distributed Chat, {username}!");
+            _uiService.DisplaySystemMessage("Type /help for available commands");
+
+            while (_isRunning)
+            {
+                var input = System.Console.ReadLine();
+                if (!string.IsNullOrEmpty(input))
+                {
+                    await ProcessInput(input);
+                }
             }
         }
-
-        System.Console.Write("Enter your username: ");
-        var username = System.Console.ReadLine()?.Trim();
-
-        if (string.IsNullOrEmpty(username))
+        catch (Exception ex)
         {
-            System.Console.WriteLine("Username cannot be empty");
-            return;
-        }
-
-        ConfigureServices(username);
-        await InitializeServices(username);
-        RegisterCommands();
-
-        _uiService.DisplaySystemMessage($"Welcome to Distributed Chat, {username}!");
-        _uiService.DisplaySystemMessage("Type /help for available commands");
-
-        while (_isRunning)
-        {
-            var input = System.Console.ReadLine();
-            if (!string.IsNullOrEmpty(input))
-            {
-                await ProcessInput(input);
-            }
+            _logger?.LogCritical(ex, "Application terminated unexpectedly");
+            System.Console.WriteLine($"Fatal error: {ex.Message}");
         }
     }
 
     private static void ConfigureServices(string username)
     {
         var services = new ServiceCollection();
+
+        services.AddLogging(builder =>
+            {
+                builder.AddConsole();
+                builder.AddDebug();
+                builder.SetMinimumLevel(LogLevel.Information);
+
+                builder.AddFilter("Microsoft", LogLevel.Warning);
+                builder.AddFilter("System", LogLevel.Warning);
+            });
 
         services.AddMediatR(cfg =>
         {

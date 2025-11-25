@@ -1,5 +1,4 @@
-﻿// Chat.Core/Interfaces/INetworkService.cs
-using System.Net;
+﻿using System.Net;
 using Chat.Core.Models;
 
 namespace Chat.Core.Interfaces

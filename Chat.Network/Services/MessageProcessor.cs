@@ -1,4 +1,3 @@
-// Chat.Network/Services/MessageProcessor.cs
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -7,6 +6,7 @@ using Chat.Core.Interfaces;
 using Chat.Core.Models;
 using Chat.Core.Enums;
 using Chat.Core.Commands;
+using Microsoft.Extensions.Logging;
 
 namespace Chat.Network.Services;
 
@@ -17,15 +17,23 @@ public class MessageProcessor
     private readonly IUserService _userService;
     private readonly IEncryptionService _encryptionService;
     private readonly INetworkService _networkService;
+    private readonly ILogger<MessageProcessor> _logger;
     private readonly HashSet<string> _respondedUsers = new();
 
-    public MessageProcessor(string username, IMediator mediator, IUserService userService, IEncryptionService encryptionService, INetworkService networkService)
+    public MessageProcessor(
+        string username,
+        IMediator mediator,
+        IUserService userService,
+        IEncryptionService encryptionService,
+        INetworkService networkService,
+        ILogger<MessageProcessor> logger)
     {
         _localUsername = username;
         _mediator = mediator;
         _userService = userService;
         _encryptionService = encryptionService;
         _networkService = networkService;
+        _logger = logger;
     }
 
     private readonly JsonSerializerOptions _jsonOptions = new JsonSerializerOptions
@@ -41,13 +49,26 @@ public class MessageProcessor
             var json = Encoding.UTF8.GetString(data);
             var message = JsonSerializer.Deserialize<ChatMessage>(json, _jsonOptions);
 
-            if (message == null) return;
-            if (message.Sender == _localUsername) return;
-            if (_userService.IsUserBanned(message.Sender))
+            if (message == null)
             {
-                Console.WriteLine($"Ignoring message from banned user: {message.Sender}");
+                _logger.LogWarning("Received null message from {Endpoint}", endpoint);
                 return;
             }
+
+            if (message.Sender == _localUsername)
+            {
+                _logger.LogDebug("Ignoring message from self: {Sender}", message.Sender);
+                return;
+            }
+
+            if (_userService.IsUserBanned(message.Sender))
+            {
+                _logger.LogInformation("Ignoring message from banned user: {Sender}", message.Sender);
+                return;
+            }
+
+            _logger.LogDebug("Processing message from {Sender}, type: {MessageType}", message.Sender, message.Type);
+
             if (await ProcessAdminCommandAsync(message)) return;
             if (await ProcessUsernameConflictAsync(message, endpoint)) return;
             if (await ProcessKeyExchangeAsync(message)) return;
@@ -56,7 +77,7 @@ public class MessageProcessor
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Message processing error: {ex.Message}");
+            _logger.LogError(ex, "Message processing error from {Endpoint}", endpoint);
         }
     }
 
@@ -69,9 +90,9 @@ public class MessageProcessor
                 var bannedUser = ExtractUsernameFromBanMessage(message.Content);
                 if (!string.IsNullOrEmpty(bannedUser))
                 {
-                    Console.WriteLine($"Processing ban sync for user: {bannedUser}");
+                    _logger.LogInformation("Processing ban sync for user: {BannedUser} from {Sender}", bannedUser, message.Sender);
                     _userService.BanUser(bannedUser);
-                    Console.WriteLine($"User {bannedUser} banned via sync from {message.Sender}");
+                    _logger.LogInformation("User {BannedUser} banned via sync from {Sender}", bannedUser, message.Sender);
                 }
                 return true;
             }
@@ -80,7 +101,7 @@ public class MessageProcessor
                 var unbannedUser = ExtractUsernameFromUnbanMessage(message.Content);
                 if (!string.IsNullOrEmpty(unbannedUser))
                 {
-                    Console.WriteLine($"Processing unban sync for user: {unbannedUser}");
+                    _logger.LogInformation("Processing unban sync for user: {UnbannedUser} from {Sender}", unbannedUser, message.Sender);
                     _userService.UnbanUser(unbannedUser);
                 }
                 return true;
@@ -95,6 +116,8 @@ public class MessageProcessor
         if (existingUser != null && existingUser.EndPoint != null &&
             !existingUser.EndPoint.Equals(new IPEndPoint(endpoint.Address, message.TcpPort)))
         {
+            _logger.LogWarning("Username conflict detected for {Sender}", message.Sender);
+
             var conflictMessage = new ChatMessage
             {
                 Sender = _localUsername,
@@ -116,12 +139,14 @@ public class MessageProcessor
             if (message.Content.StartsWith("KEY_EXCHANGE_REQUEST:"))
             {
                 var keyBase64 = message.Content.Substring("KEY_EXCHANGE_REQUEST:".Length);
+                _logger.LogInformation("Processing key exchange request from {Sender}", message.Sender);
                 await _mediator.Publish(new KeyExchangeRequestEvent(message.Sender, keyBase64));
                 return true;
             }
             else if (message.Content.StartsWith("KEY_EXCHANGE_RESPONSE:"))
             {
                 var keyBase64 = message.Content.Substring("KEY_EXCHANGE_RESPONSE:".Length);
+                _logger.LogInformation("Processing key exchange response from {Sender}", message.Sender);
                 await _mediator.Publish(new KeyExchangeResponseEvent(message.Sender, keyBase64));
                 return true;
             }
@@ -136,9 +161,11 @@ public class MessageProcessor
 
         await _mediator.Publish(new UserJoinenEvent(user));
 
-        // Обработка присоединения новых пользователей и обмен ключами
         if (message.Type == MessageType.System && message.Content.Contains("joined"))
+        {
+            _logger.LogDebug("Processing user join: {Sender}", message.Sender);
             await ProcessUserJoinAsync(message.Sender, userEndpoint);
+        }
 
         await _mediator.Publish(new MessageReceivedEvent(message));
     }
@@ -167,11 +194,12 @@ public class MessageProcessor
                 TcpPort = _networkService.GetTcpPort()
             };
 
+            _logger.LogDebug("Initiating key exchange with {TargetUser}", targetUser);
             await _networkService.SendP2PMessageAsync(keyMessage, endpoint);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Key exchange initiation error: {ex.Message}");
+            _logger.LogError(ex, "Key exchange initiation error with {TargetUser}", targetUser);
         }
     }
 
@@ -189,11 +217,12 @@ public class MessageProcessor
                 TcpPort = _networkService.GetTcpPort()
             };
 
+            _logger.LogDebug("Sending key exchange response to {TargetUser}", targetUser);
             await _networkService.SendP2PMessageAsync(responseMessage, endpoint);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Key exchange response error: {ex.Message}");
+            _logger.LogError(ex, "Key exchange response error to {TargetUser}", targetUser);
         }
     }
 

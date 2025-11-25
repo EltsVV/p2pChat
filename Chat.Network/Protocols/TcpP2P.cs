@@ -1,6 +1,7 @@
 ﻿using System.Net.Sockets;
 using System.Net;
 using Chat.Core.Interfaces;
+using Microsoft.Extensions.Logging;
 
 namespace Chat.Network.Protocols
 {
@@ -11,21 +12,24 @@ namespace Chat.Network.Protocols
         private bool _isRunning;
         private readonly CancellationTokenSource _cancellationTokenSource;
         private bool _isPortAutoSelected = false;
+        private readonly ILogger<TcpP2P> _logger;
 
         public event Action<IPEndPoint, byte[]>? MessageReceived;
 
-        public TcpP2P(int port = 12346)
+        public TcpP2P(int port, ILogger<TcpP2P> logger)
         {
             _port = port;
+            _logger = logger;
             _cancellationTokenSource = new CancellationTokenSource();
 
             try
             {
                 _tcpListener = new TcpListener(IPAddress.Any, port);
+                _logger.LogDebug("TCP listener created on port {Port}", port);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Failed to create TCP listener on port {port}: {ex.Message}");
+                _logger.LogError(ex, "Failed to create TCP listener on port {Port}", port);
                 throw;
             }
         }
@@ -36,17 +40,17 @@ namespace Chat.Network.Protocols
             {
                 _isRunning = true;
                 _tcpListener.Start();
-                Console.WriteLine($"TCP P2P started on port {((IPEndPoint)_tcpListener.LocalEndpoint).Port}");
+                _logger.LogInformation("TCP P2P started on port {Port}", ((IPEndPoint)_tcpListener.LocalEndpoint).Port);
                 Task.Run(AcceptConnections);
             }
             catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
             {
-                Console.WriteLine($"TCP port {_port} is already in use. Searching for available port...");
+                _logger.LogWarning("TCP port {Port} is already in use. Searching for available port...", _port);
                 StartWithAutoPort();
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"TCP startup error: {ex.Message}");
+                _logger.LogError(ex, "TCP startup error on port {Port}", _port);
             }
         }
 
@@ -59,12 +63,12 @@ namespace Chat.Network.Protocols
                 _isRunning = true;
                 _tcpListener.Start();
                 _isPortAutoSelected = true;
-                Console.WriteLine($"TCP P2P started on automatically selected port {availablePort}");
+                _logger.LogInformation("TCP P2P started on automatically selected port {Port}", availablePort);
                 Task.Run(AcceptConnections);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Failed to start TCP with auto port selection: {ex.Message}");
+                _logger.LogError(ex, "Failed to start TCP with auto port selection");
             }
         }
 
@@ -103,10 +107,11 @@ namespace Chat.Network.Protocols
             try
             {
                 _tcpListener?.Stop();
+                _logger.LogInformation("TCP P2P stopped");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error stopping TCP listener: {ex.Message}");
+                _logger.LogError(ex, "Error stopping TCP listener");
             }
         }
 
@@ -132,14 +137,16 @@ namespace Chat.Network.Protocols
         {
             try
             {
+                _logger.LogDebug("Sending TCP message to {Endpoint}", endpoint);
                 using var client = new TcpClient();
                 await client.ConnectAsync(endpoint.Address, endpoint.Port);
                 using var stream = client.GetStream();
                 await stream.WriteAsync(data, 0, data.Length, _cancellationTokenSource.Token);
+                _logger.LogDebug("TCP message sent successfully to {Endpoint}", endpoint);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"TCP send error: {ex.Message}");
+                _logger.LogError(ex, "TCP send error to {Endpoint}", endpoint);
             }
         }
 
@@ -150,6 +157,7 @@ namespace Chat.Network.Protocols
                 try
                 {
                     var client = await _tcpListener.AcceptTcpClientAsync(_cancellationTokenSource.Token);
+                    _logger.LogDebug("TCP connection accepted from {RemoteEndpoint}", client.Client.RemoteEndPoint);
                     _ = Task.Run(() => HandleClient(client));
                 }
                 catch (OperationCanceledException)
@@ -164,7 +172,7 @@ namespace Chat.Network.Protocols
                 {
                     if (_isRunning)
                     {
-                        Console.WriteLine($"TCP accept error: {ex.Message}");
+                        _logger.LogError(ex, "TCP accept error");
                     }
                     break;
                 }
@@ -187,13 +195,14 @@ namespace Chat.Network.Protocols
                         Array.Copy(buffer, data, bytesRead);
 
                         var remoteEndPoint = (IPEndPoint)client.Client.RemoteEndPoint!;
+                        _logger.LogDebug("TCP message received from {RemoteEndpoint}, {BytesRead} bytes", remoteEndPoint, bytesRead);
                         MessageReceived?.Invoke(remoteEndPoint, data);
                     }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"TCP client handling error: {ex.Message}");
+                _logger.LogError(ex, "TCP client handling error");
             }
         }
 

@@ -65,6 +65,12 @@ public class ConsoleUIService : IUIService
         }
         System.Console.WriteLine("====================\n");
     }
+    public void DisplayEmojiList<TKey, TValue>(IDictionary<TKey, TValue> keyValuePairs)
+    {
+        System.Console.WriteLine("\n====== Emojis ======");
+        foreach (var pair in keyValuePairs) System.Console.WriteLine($"  {pair.Key} -  {pair.Value}");
+        System.Console.WriteLine("====================\n");
+    }
     public void DisplayMessage(string recipient, string message)
     {
         var originalColor = System.Console.ForegroundColor;

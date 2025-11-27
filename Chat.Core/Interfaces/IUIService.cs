@@ -9,4 +9,5 @@ public interface IUIService
     void DisplaySystemMessage(string message);
     void DisplayErrorMessage(string message);
     void DisplayUserList(IEnumerable<User> users);
+    void DisplayEmojiList<TKey, TValue>(IDictionary<TKey, TValue> keyValuePairs);
 }

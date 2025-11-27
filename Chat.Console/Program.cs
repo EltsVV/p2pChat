@@ -16,6 +16,7 @@ class Program
     private static IServiceProvider _serviceProvider = null!;
     private static IMediator _mediator = null!;
     private static IUIService _uiService = null!;
+    private static IEmoji _emoji = null!;
     private static List<IChatCommand> _commands = null!;
     private static ILogger<Program> _logger = null!;
     private static bool _isRunning = true;
@@ -92,6 +93,7 @@ class Program
 
         services.AddSingleton<IUIService, ConsoleUIService>();
         services.AddSingleton<IUserService, UserService>();
+        services.AddSingleton<IEmoji, EmojiService>();
         services.AddSingleton<IEncryptionService, AesEncryptionService>();
 
         services.AddSingleton<INetworkService>(provider =>
@@ -113,6 +115,7 @@ class Program
         _serviceProvider = services.BuildServiceProvider();
         _mediator = _serviceProvider.GetRequiredService<IMediator>();
         _uiService = _serviceProvider.GetRequiredService<IUIService>();
+        _emoji = _serviceProvider.GetRequiredService<IEmoji>();
     }
 
     private static async Task InitializeServices(string username)
@@ -133,6 +136,7 @@ class Program
             new BanUserConsoleCommand(_mediator, _uiService),
             new UnbanUserConsoleCommand(_mediator, _uiService),
             new UsersCommand(_mediator, _uiService, networkService),
+            new EmojiCommand(_uiService, _emoji),
         };
 
         var helpCommand = new HelpCommand(new List<IChatCommand>(_commands), _uiService);
